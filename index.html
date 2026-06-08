@@ -186,7 +186,7 @@ function parseCSV(text){
   return rows;
 }
 
-function num(s){const c=String(s||0).replace(/[,\s₩원%+]/g,'').replace(/\.$/,'');return parseFloat(c)||0;}
+function num(s){const c=String(s||0).trim().replace(/^"|"$/g,'').replace(/[,\s₩원%+]/g,'').replace(/\.$/,'');return parseFloat(c)||0;}
 function fmt(n,unit='원'){
   const a=Math.abs(n),sign=n<0?'-':'';
   if(a>=100000000)return sign+(a/100000000).toFixed(1)+'억'+unit;
@@ -303,7 +303,18 @@ function parseChild(rows,usdKrw,label){
 function renderAll(){
   const cfg=parseSettings();
   const usdKrw=num(cfg['USD/KRW 환율']||'1380');
+  console.log('[DEBUG] 환율:', usdKrw);
+  console.log('[DEBUG] 포트폴리오 원본 행 수:', allData.port.length);
+  // 헤더 위치 찾기
+  allData.port.forEach((row,i)=>{if(row.some(c=>(c||'').includes('종목명')))console.log('[DEBUG] 헤더행 index:',i,'내용:',row.slice(0,5));});
+  // 데이터 행 샘플
+  allData.port.slice(0,10).forEach((row,i)=>console.log('[DEBUG] port row',i,':',JSON.stringify(row.slice(0,9))));
+  // 배당 헤더 위치
+  allData.div.forEach((row,i)=>{if(row.some(c=>(c||'').includes('배당일')))console.log('[DEBUG] 배당헤더 index:',i,'내용:',row.slice(0,6));});
+  allData.div.slice(0,10).forEach((row,i)=>console.log('[DEBUG] div row',i,':',JSON.stringify(row.slice(0,6))));
   const holdings=parsePort(usdKrw);
+  console.log('[DEBUG] 파싱된 종목 수:', holdings.length);
+  holdings.forEach(h=>console.log('[DEBUG] 종목:',h.name,'평가:',h.eval,'계좌:',h.acct));
   const totalEval=holdings.reduce((s,h)=>s+h.eval,0);
   const totalBuy=holdings.reduce((s,h)=>s+h.buy,0);
   const totalPnl=totalEval-totalBuy;
