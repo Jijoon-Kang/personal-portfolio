@@ -195,31 +195,88 @@ function fmt(n,unit='원'){
 }
 function fmtPct(n){return(n>=0?'+':'')+n.toFixed(2)+'%';}
 
-// 트리맵 squarify
-function squarify(items,x,y,w,h){
-  if(!items.length)return[];
-  const total=items.reduce((s,i)=>s+i.value,0);
-  const rects=[];let rem=[...items],rx=x,ry=y,rw=w,rh=h;
-  while(rem.length){
-    const horiz=rw>=rh,side=horiz?rh:rw;
-    let rowItems=[],rowSum=0,bestR=Infinity;
-    for(let i=0;i<rem.length;i++){
-      const item=rem[i],ns=rowSum+item.value,area=(ns/total)*rw*rh,rl=area/side;
-      let ratio=0;
-      for(const ri of [...rowItems,item]){const a=(ri.value/total)*rw*rh,cl=a/rl;ratio=Math.max(ratio,Math.max(rl/cl,cl/rl));}
-      if(rowItems.length&&ratio>bestR)break;
-      rowItems.push(item);rowSum+=item.value;bestR=ratio;
-    }
-    const ra=(rowSum/total)*rw*rh,rl=ra/side;
-    let cx=rx,cy=ry;
-    for(const item of rowItems){
-      const ca=(item.value/total)*rw*rh,cs2=ca/rl;
-      rects.push({...item,x:horiz?cx:rx,y:horiz?ry:cy,w:horiz?cs2:rl,h:horiz?rl:cs2});
-      if(horiz)cx+=cs2;else cy+=cs2;
-    }
-    if(horiz){ry+=rl;rh-=rl;}else{rx+=rl;rw-=rl;}
-    rem=rem.slice(rowItems.length);
+// 트리맵 - slice-and-dice 방식 (안정적)
+function buildTreemap(items, x, y, w, h) {
+  if (!items.length) return [];
+  if (items.length === 1) {
+    return [{...items[0], x, y, w, h}];
   }
+  const total = items.reduce((s, i) => s + i.value, 0);
+  const rects = [];
+
+  function slice(items, x, y, w, h, horiz) {
+    if (!items.length) return;
+    const total = items.reduce((s, i) => s + i.value, 0);
+    let pos = horiz ? x : y;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const ratio = item.value / total;
+      const size = (horiz ? w : h) * ratio;
+      const last = i === items.length - 1;
+      // 마지막 항목은 남은 공간 전부 (부동소수점 오차 방지)
+      const cellSize = last ? (horiz ? (x + w - pos) : (y + h - pos)) : size;
+      rects.push({
+        ...item,
+        x: horiz ? pos : x,
+        y: horiz ? y : pos,
+        w: horiz ? cellSize : w,
+        h: horiz ? h : cellSize,
+      });
+      pos += cellSize;
+    }
+  }
+
+  // 황금비에 가깝게 분할점 찾기
+  function bestSplit(items, w, h) {
+    const total = items.reduce((s, i) => s + i.value, 0);
+    let best = 1, bestScore = Infinity;
+    let cumSum = 0;
+    for (let i = 0; i < items.length - 1; i++) {
+      cumSum += items[i].value;
+      const r1 = cumSum / total;
+      const r2 = 1 - r1;
+      if (r1 === 0 || r2 === 0) continue;
+      // 두 섹션의 aspect ratio 계산
+      const horiz = w >= h;
+      let score;
+      if (horiz) {
+        const w1 = w * r1, w2 = w * r2;
+        const ar1 = Math.max(w1/h, h/w1);
+        const ar2 = Math.max(w2/h, h/w2);
+        score = Math.max(ar1, ar2);
+      } else {
+        const h1 = h * r1, h2 = h * r2;
+        const ar1 = Math.max(w/h1, h1/w);
+        const ar2 = Math.max(w/h2, h2/w);
+        score = Math.max(ar1, ar2);
+      }
+      if (score < bestScore) { bestScore = score; best = i + 1; }
+    }
+    return best;
+  }
+
+  function layout(items, x, y, w, h, depth) {
+    if (!items.length) return;
+    if (items.length <= 2 || depth > 8) {
+      slice(items, x, y, w, h, w >= h);
+      return;
+    }
+    const split = bestSplit(items, w, h);
+    const total = items.reduce((s, i) => s + i.value, 0);
+    const r1 = items.slice(0, split).reduce((s, i) => s + i.value, 0) / total;
+    const horiz = w >= h;
+    if (horiz) {
+      const w1 = w * r1;
+      slice(items.slice(0, split), x, y, w1, h, false);
+      layout(items.slice(split), x + w1, y, w - w1, h, depth + 1);
+    } else {
+      const h1 = h * r1;
+      slice(items.slice(0, split), x, y, w, h1, true);
+      layout(items.slice(split), x, y + h1, w, h - h1, depth + 1);
+    }
+  }
+
+  layout(items, x, y, w, h, 0);
   return rects;
 }
 
@@ -351,11 +408,10 @@ function renderAll(){
 function renderTreemap(holdings,total){
   const container=document.getElementById('treemap');
   const W=container.offsetWidth||700,H=380;
-  console.log('[DEBUG] 트리맵 입력 종목수:', holdings.length, holdings.map(h=>h.name+':'+h.eval));
   const items=holdings.filter(h=>h.eval>0).sort((a,b)=>b.eval-a.eval)
     .map((h,i)=>({...h,value:h.eval,color:COLORS[i%COLORS.length]}));
   if(!items.length){container.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--gray);font-size:0.85rem;font-family:var(--font-mono)">데이터 없음</div>';return;}
-  const rects=squarify(items,0,0,W,H);
+  const rects=buildTreemap(items,0,0,W,H);
   container.innerHTML='';container.style.height=H+'px';
   for(const r of rects){
     if(r.w<2||r.h<2)continue;
