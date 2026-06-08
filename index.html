@@ -186,7 +186,7 @@ function parseCSV(text){
   return rows;
 }
 
-function num(s){return parseFloat(String(s||0).replace(/[,\s₩원%+]/g,''))||0;}
+function num(s){const c=String(s||0).replace(/[,\s₩원%+]/g,'').replace(/\.$/,'');return parseFloat(c)||0;}
 function fmt(n,unit='원'){
   const a=Math.abs(n),sign=n<0?'-':'';
   if(a>=100000000)return sign+(a/100000000).toFixed(1)+'억'+unit;
@@ -267,9 +267,11 @@ function parseSettings(){
 function parsePort(usdKrw){
   const holdings=[];let hdr=false;
   for(const row of allData.port){
-    if((row[1]||'')==='종목명/자산명'){hdr=true;continue;}
-    if(!hdr||!row[1])continue;
-    const name=row[1],cat=row[2]||'',acct=row[3]||'',ccy=row[4]||'KRW';
+    if(row.some(c=>(c||'').replace(/"/g,'').trim()==='종목명/자산명')){hdr=true;continue;}
+    if(!hdr)continue;
+    const name=(row[1]||'').replace(/"/g,'').trim();
+    if(!name)continue;
+    const cat=(row[2]||'').trim(),acct=(row[3]||'').trim(),ccy=(row[4]||'KRW').trim();
     const avgP=num(row[5]),curP=num(row[6]),qty=num(row[7]);
     const fx=ccy==='USD'?usdKrw:1;
     const buy=avgP*qty*fx,eval_=curP*qty*fx;
@@ -449,18 +451,25 @@ function renderDividend(){
   // 데이터: col1=날짜, col2=종목명, col3=계좌, col4=배당금(원)
   const records=[];let hdr=false;
   for(const row of allData.div){
-    if((row[1]||'')==='배당일'){hdr=true;continue;}
+    // 월별집계 섹션 시작하면 중단
+    if(hdr&&row.some(c=>(c||'').includes('월별 배당')))break;
+    // 헤더 감지 - 어느 셀에든 '배당일' 있으면
+    if(!hdr&&row.some(c=>(c||'').replace(/"/g,'').trim()==='배당일')){hdr=true;continue;}
     if(!hdr)continue;
-    const dt=(row[1]||'').trim(),name=(row[2]||'').trim(),acct=(row[3]||'').trim(),amt=num(row[4]);
-    if(!dt||!name||!dt.match(/\d{4}/))continue;
-    records.push({dt,name,acct,amt});
+    const dtRaw=(row[1]||'').replace(/"/g,'').trim();
+    const name=(row[2]||'').trim(),acct=(row[3]||'').trim(),amt=num(row[4]);
+    if(!dtRaw||!name||!dtRaw.match(/\d{4}/))continue;
+    // 날짜 표시용: "2026-01-05 00:00:00" → "2026-01-05"
+    const dt=dtRaw.replace(/ \d{2}:\d{2}:\d{2}$/,'').substring(0,10);
+    const yr=dt.substring(0,4);
+    records.push({dt,yr,name,acct,amt});
   }
 
-  const thisYear=new Date().getFullYear();
+  const thisYear=String(new Date().getFullYear());
   const totalAll=records.reduce((s,r)=>s+r.amt,0);
-  const totalYear=records.filter(r=>r.dt.startsWith(String(thisYear))).reduce((s,r)=>s+r.amt,0);
+  const totalYear=records.filter(r=>r.yr===thisYear).reduce((s,r)=>s+r.amt,0);
   const totalISA=records.filter(r=>r.acct==='ISA').reduce((s,r)=>s+r.amt,0);
-  const cntYear=records.filter(r=>r.dt.startsWith(String(thisYear))).length;
+  const cntYear=records.filter(r=>r.yr===thisYear).length;
 
   document.getElementById('div-kpi-area').innerHTML=[
     {label:'올해 배당금',val:fmt(totalYear),color:'var(--green)'},
