@@ -520,27 +520,44 @@ function renderDividend(){
   // row2: 빈행
   // row3~: 날짜가 있는 실제 데이터 ["","2026-01-05","종목명","계좌","금액",...]
   //        단, 종목명/계좌가 병합셀로 인해 비어있을 수 있음
+  // 헤더행에서 열 인덱스 동적으로 찾기
+  let colDt=-1,colName=-1,colAcct=-1,colAmt=-1;
   const records=[];
-  // 날짜 패턴으로 데이터 행 직접 감지 (헤더 의존 안 함)
+
   for(const row of allData.div){
     // 월별집계 섹션이면 중단
     if(row.some(c=>(c||'').includes('월별')))break;
-    const dtRaw=(row[1]||'').trim();
-    // YYYY-MM-DD 또는 YYYY/MM/DD 형식인지 확인
+
+    // 헤더행 감지 (배당일 텍스트 있는 행)
+    if(colDt===-1){
+      const hi=row.findIndex(c=>(c||'').trim()==='배당일');
+      if(hi!==-1){
+        colDt=hi;
+        // 헤더행에서 각 열 위치 찾기
+        row.forEach((c,i)=>{
+          const v=(c||'').trim();
+          if(v==='종목명') colName=i;
+          if(v==='계좌')   colAcct=i;
+          if(v==='배당금(원)') colAmt=i;
+        });
+        continue;
+      }
+      continue; // 헤더 못 찾으면 스킵
+    }
+
+    // 데이터 행
+    const dtRaw=(row[colDt]||'').trim();
     if(!dtRaw.match(/^\d{4}[-/]\d{2}[-/]\d{2}/))continue;
     const dt=dtRaw.substring(0,10);
     const yr=dt.substring(0,4);
-    // 종목명: row[2] 없으면 이전 레코드 종목명 사용 (병합셀 대응)
-    const name=(row[2]||'').trim()||
+    const name=(colName!==-1?(row[colName]||''):'').trim()||
       (records.length>0?records[records.length-1].rawName:'');
-    const acct=(row[3]||'').trim()||
+    const acct=(colAcct!==-1?(row[colAcct]||''):'').trim()||
       (records.length>0?records[records.length-1].acct:'ISA');
-    // 배당금: row[4]에 있음
-    const amt=num(row[4]);
-    if(!amt)continue; // 금액 없는 행 스킵
+    const amt=num(colAmt!==-1?row[colAmt]:'');
+    if(!amt)continue;
     records.push({dt,yr,name,rawName:name,acct,amt});
   }
-  console.log('[DEBUG] 배당 레코드 수:', records.length, records.slice(0,3));
 
   const thisYear=String(new Date().getFullYear());
   const totalAll=records.reduce((s,r)=>s+r.amt,0);
