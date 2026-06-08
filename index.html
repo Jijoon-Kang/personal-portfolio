@@ -351,6 +351,7 @@ function renderAll(){
 function renderTreemap(holdings,total){
   const container=document.getElementById('treemap');
   const W=container.offsetWidth||700,H=380;
+  console.log('[DEBUG] 트리맵 입력 종목수:', holdings.length, holdings.map(h=>h.name+':'+h.eval));
   const items=holdings.filter(h=>h.eval>0).sort((a,b)=>b.eval-a.eval)
     .map((h,i)=>({...h,value:h.eval,color:COLORS[i%COLORS.length]}));
   if(!items.length){container.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--gray);font-size:0.85rem;font-family:var(--font-mono)">데이터 없음</div>';return;}
@@ -457,24 +458,33 @@ function renderHoldings(holdings,total){
 }
 
 function renderDividend(){
-  // 배당 시트 구조:
-  // 헤더행: col1='배당일'
-  // 데이터: col1=날짜, col2=종목명, col3=계좌, col4=배당금(원)
-  const records=[];let hdr=false;
+  // 실제 Sheets CSV 구조 (병합셀로 인해 변형됨):
+  // row0: 타이틀+KPI레이블 합쳐진 행
+  // row1: KPI 값들 ["","161,518","","161,518",...]
+  // row2: 빈행
+  // row3~: 날짜가 있는 실제 데이터 ["","2026-01-05","종목명","계좌","금액",...]
+  //        단, 종목명/계좌가 병합셀로 인해 비어있을 수 있음
+  const records=[];
+  // 날짜 패턴으로 데이터 행 직접 감지 (헤더 의존 안 함)
   for(const row of allData.div){
-    // 월별집계 섹션 시작하면 중단
-    if(hdr&&row.some(c=>(c||'').includes('월별 배당')))break;
-    // 헤더 감지 - 어느 셀에든 '배당일' 있으면
-    if(!hdr&&row.some(c=>(c||'').replace(/"/g,'').trim()==='배당일')){hdr=true;continue;}
-    if(!hdr)continue;
-    const dtRaw=(row[1]||'').replace(/"/g,'').trim();
-    const name=(row[2]||'').trim(),acct=(row[3]||'').trim(),amt=num(row[4]);
-    if(!dtRaw||!name||!dtRaw.match(/\d{4}/))continue;
-    // 날짜 표시용: "2026-01-05 00:00:00" → "2026-01-05"
-    const dt=dtRaw.replace(/ \d{2}:\d{2}:\d{2}$/,'').substring(0,10);
+    // 월별집계 섹션이면 중단
+    if(row.some(c=>(c||'').includes('월별')))break;
+    const dtRaw=(row[1]||'').trim();
+    // YYYY-MM-DD 또는 YYYY/MM/DD 형식인지 확인
+    if(!dtRaw.match(/^\d{4}[-/]\d{2}[-/]\d{2}/))continue;
+    const dt=dtRaw.substring(0,10);
     const yr=dt.substring(0,4);
-    records.push({dt,yr,name,acct,amt});
+    // 종목명: row[2] 없으면 이전 레코드 종목명 사용 (병합셀 대응)
+    const name=(row[2]||'').trim()||
+      (records.length>0?records[records.length-1].rawName:'');
+    const acct=(row[3]||'').trim()||
+      (records.length>0?records[records.length-1].acct:'ISA');
+    // 배당금: row[4]에 있음
+    const amt=num(row[4]);
+    if(!amt)continue; // 금액 없는 행 스킵
+    records.push({dt,yr,name,rawName:name,acct,amt});
   }
+  console.log('[DEBUG] 배당 레코드 수:', records.length, records.slice(0,3));
 
   const thisYear=String(new Date().getFullYear());
   const totalAll=records.reduce((s,r)=>s+r.amt,0);
